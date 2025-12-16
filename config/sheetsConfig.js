@@ -13,20 +13,20 @@ export const sheetsConfig = {
 
   orders: {
     sheetName: "Orders",
-    columns: ["id", "user_id", "total_amount", "created_at"],
-    headers: ["Order ID", "User ID", "Total Amount", "Order Date"]
+    columns: ["id", "customer_name", "customer_phone", "customer_email", "total_amount", "order_status", "payment_status", "payment_method", "special_instructions", "created_at"],
+    headers: ["Order ID", "Customer Name", "Phone", "Email", "Total Amount", "Order Status", "Payment Status", "Payment Method", "Special Instructions", "Order Date"]
   },
 
   order_items: {
     sheetName: "Order_Items",
-    columns: ["id", "order_id", "menu_item_id", "quantity", "price"],
-    headers: ["Item ID", "Order ID", "Menu Item ID", "Quantity", "Price"]
+    columns: ["id", "order_id", "menu_item_id", "item_name", "item_price", "quantity", "subtotal", "special_instructions"],
+    headers: ["Item ID", "Order ID", "Menu Item ID", "Item Name", "Price", "Quantity", "Subtotal", "Special Instructions"]
   },
 
   order_status_history: {
     sheetName: "Order_Status_History",
-    columns: ["id", "order_id", "status", "timestamp"],
-    headers: ["History ID", "Order ID", "Status", "Timestamp"]
+    columns: ["id", "order_id", "old_status", "new_status", "changed_by", "timestamp"],
+    headers: ["History ID", "Order ID", "Old Status", "New Status", "Changed By", "Timestamp"]
   },
 
   feedback: {

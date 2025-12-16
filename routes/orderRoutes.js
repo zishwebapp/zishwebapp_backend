@@ -1,0 +1,21 @@
+import express from "express";
+import { 
+  placeOrder, 
+  getAllOrders, 
+  getOrderById,
+  updateOrderStatus,
+  updatePaymentStatus,
+  getOrdersByCustomer 
+} from "../controllers/orderController.js";
+
+const router = express.Router();
+
+// Order management routes
+router.post("/", placeOrder);                          // Place new order
+router.get("/", getAllOrders);                         // Get all orders
+router.get("/customer/:phone", getOrdersByCustomer);   // Get orders by customer phone
+router.get("/:id", getOrderById);                      // Get single order by ID
+router.put("/:id/status", updateOrderStatus);          // Update order status
+router.put("/:id/payment", updatePaymentStatus);       // Update payment status
+
+export default router;
