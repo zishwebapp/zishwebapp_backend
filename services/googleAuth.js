@@ -11,18 +11,37 @@ let driveClient = null;
 let authClient = null;
 
 /**
- * Authenticate using the service account from file
+ * Authenticate using the service account from environment variable or file
+ * Priority: GOOGLE_PROJECT_CREDENTIALS (JSON string) > GOOGLE_APPLICATION_CREDENTIALS (file path)
  */
 export async function getAuthClient() {
   if (authClient) return authClient;
 
-  const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './credentials/service-account.json';
-  
   try {
-    // Read credentials from file
-    const fullPath = join(__dirname, '..', credPath);
-    const credentials = JSON.parse(readFileSync(fullPath, 'utf8'));
+    let credentials;
 
+    // Option 1: Try to get credentials from environment variable (for Render/production)
+    if (process.env.GOOGLE_PROJECT_CREDENTIALS) {
+      console.log('📝 Loading Google credentials from GOOGLE_PROJECT_CREDENTIALS env variable');
+      
+      try {
+        credentials = JSON.parse(process.env.GOOGLE_PROJECT_CREDENTIALS);
+        console.log('✅ Successfully parsed credentials from environment variable');
+      } catch (parseError) {
+        throw new Error(`Failed to parse GOOGLE_PROJECT_CREDENTIALS: ${parseError.message}`);
+      }
+    } 
+    // Option 2: Fall back to reading from file (for local development)
+    else {
+      const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './credentials/service-account.json';
+      console.log(`📁 Loading Google credentials from file: ${credPath}`);
+      
+      const fullPath = join(__dirname, '..', credPath);
+      credentials = JSON.parse(readFileSync(fullPath, 'utf8'));
+      console.log('✅ Successfully loaded credentials from file');
+    }
+
+    // Create auth client with credentials
     const auth = new google.auth.GoogleAuth({
       credentials,
       scopes: [
@@ -32,9 +51,12 @@ export async function getAuthClient() {
     });
 
     authClient = await auth.getClient();
+    console.log('✅ Google Auth client created successfully');
     return authClient;
+    
   } catch (error) {
-    throw new Error(`Failed to load credentials from ${credPath}: ${error.message}`);
+    console.error('❌ Failed to authenticate with Google:', error.message);
+    throw new Error(`Google authentication failed: ${error.message}`);
   }
 }
 

@@ -29,13 +29,22 @@ import { create, bulkCreate } from "./services/sheetService.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load menu data
-const menuData = JSON.parse(
-  readFileSync(join(__dirname, "data", "menu.json"), "utf-8")
-);
+// Load menu data (optional - only needed for test-sheets endpoint)
+let menuData = { menu: [] };
+try {
+  menuData = JSON.parse(
+    readFileSync(join(__dirname, "data", "menu.json"), "utf-8")
+  );
+  console.log(`✅ Menu data loaded: ${menuData.menu?.length || 0} items found`);
+} catch (error) {
+  console.warn("⚠️  menu.json not found - /api/test-sheets endpoint will not work");
+  console.warn("This is normal for production deployment where menu data is already in Google Sheets.");
+}
 
-console.log("Loaded GOOGLE_PROJECT_CREDENTIALS:", !!process.env.GOOGLE_PROJECT_CREDENTIALS);
-console.log(`Menu data loaded: ${menuData.menu?.length || 0} items found`);
+console.log("🔑 GOOGLE_PROJECT_CREDENTIALS:", process.env.GOOGLE_PROJECT_CREDENTIALS ? "✅ Set (JSON)" : "❌ Not set");
+console.log("📁 GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS ? `✅ Set (${process.env.GOOGLE_APPLICATION_CREDENTIALS})` : "❌ Not set");
+console.log("📊 MASTER_SPREADSHEET_ID:", process.env.MASTER_SPREADSHEET_ID ? "✅ Set" : "❌ Not set");
+console.log("🌐 FRONTEND_URL:", process.env.FRONTEND_URL || "Not set (defaulting to localhost:3001)");
 
 // Fix headers in existing quarterly tabs
 app.get("/api/fix-sheet-headers", async (req, res) => {
