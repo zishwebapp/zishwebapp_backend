@@ -2,5 +2,6 @@ node_modules/
 .env
 credentials/
 *.json
+!data/menu.json
 !package.json
 !package-lock.json

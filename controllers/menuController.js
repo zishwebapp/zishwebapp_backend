@@ -32,17 +32,18 @@ export async function getMenuItems(req, res) {
     const rows = response.data.values || [];
 
     // STEP 4 — Map rows into objects
+    // Google Sheets columns: ["id", "item_name", "price", "category", "availability"]
     const menu = rows.map(row => ({
       id: row[0] ?? null,
       name: row[1] ?? "",
       price: row[2] ? Number(row[2]) : null,
       category_id: row[3] ? Number(row[3]) : null,
-      description: "",
-      image_url: row[5] ?? "",
-      is_available: "",
-      preparation_time_minutes: row[7] ? Number(row[7]) : null,
-      created_at: row[8] ?? null,
-      updated_at: row[9] ?? null
+      description: "", // Not stored in Google Sheets
+      image_url: "", // Not stored in Google Sheets
+      is_available: (row[4] || "").toLowerCase() === "true" || (row[4] || "").toLowerCase() === "available",
+      preparation_time_minutes: null, // Not stored in Google Sheets
+      created_at: null,
+      updated_at: null
     }));
 
     res.json({
