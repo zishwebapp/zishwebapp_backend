@@ -1,8 +1,8 @@
 export const sheetsConfig = {
   users: {
     sheetName: "Users",
-    columns: ["id", "name", "email", "password", "created_at"],
-    headers: ["User ID", "Full Name", "Email Address", "Password Hash", "Registration Date"]
+    columns: ["id", "name", "email", "password", "role", "created_at"],
+    headers: ["User ID", "Full Name", "Email Address", "Password Hash", "Role", "Registration Date"]
   },
 
   menu_items: {

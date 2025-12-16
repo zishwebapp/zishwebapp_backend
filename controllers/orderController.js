@@ -125,6 +125,7 @@ export async function placeOrder(req, res) {
 
 /**
  * GET /api/orders - Get all orders
+ * Returns orders sorted by creation date (newest first) with edge case handling
  */
 export async function getAllOrders(req, res) {
   try {
@@ -133,28 +134,56 @@ export async function getAllOrders(req, res) {
     // Get all orders from current quarter
     const orders = await getAll("orders");
     
-    // Optionally get order items for each order
+    // Get order items for each order
     const orderItems = await getAll("order_items");
+    
+    // Detect orphaned order items (items without parent order)
+    const validOrderIds = new Set(orders.map(o => o.id));
+    const orphanedItems = orderItems.filter(item => !validOrderIds.has(item.order_id));
+    
+    if (orphanedItems.length > 0) {
+      console.warn(`⚠️  Found ${orphanedItems.length} orphaned order items (no parent order):`, 
+        orphanedItems.map(i => `Item ID: ${i.id}, Order ID: ${i.order_id}`));
+    }
     
     // Combine orders with their items
     const ordersWithItems = orders.map(order => {
       const items = orderItems.filter(item => item.order_id === order.id);
+      
+      // Edge case: Order without items (data integrity issue)
+      if (items.length === 0) {
+        console.warn(`⚠️  Order ${order.id} has no items (orphaned order)`);
+      }
+      
       return {
         ...order,
         items: items.map(item => ({
           itemName: item.item_name,
           quantity: Number(item.quantity),
           price: Number(item.item_price),
-          subtotal: Number(item.subtotal)
+          subtotal: Number(item.subtotal),
+          specialInstructions: item.special_instructions
         })),
-        itemCount: items.length
+        itemCount: items.length,
+        isOrphaned: items.length === 0 // Flag for frontend
       };
+    });
+
+    // SORT BY CREATED_AT DESCENDING (newest orders first)
+    ordersWithItems.sort((a, b) => {
+      const dateA = new Date(a.created_at || 0).getTime();
+      const dateB = new Date(b.created_at || 0).getTime();
+      return dateB - dateA; // Descending order
     });
 
     res.json({
       success: true,
       count: ordersWithItems.length,
-      data: ordersWithItems
+      data: ordersWithItems,
+      warnings: {
+        orphanedItems: orphanedItems.length,
+        orphanedOrders: ordersWithItems.filter(o => o.isOrphaned).length
+      }
     });
 
   } catch (error) {
@@ -412,6 +441,186 @@ export async function getOrdersByCustomer(req, res) {
     res.status(500).json({
       success: false,
       message: "Failed to fetch customer orders",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * DELETE /api/orders/:id - Delete order and all related records
+ * Removes order from orders, order_items, and order_status_history sheets
+ */
+export async function deleteOrder(req, res) {
+  try {
+    const { id } = req.params;
+    console.log(`Deleting order: ${id}`);
+
+    // Import remove function
+    const { remove } = await import("../services/sheetService.js");
+
+    // Step 1: Verify order exists
+    const orderResult = await getById("orders", id);
+    if (!orderResult) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    // Step 2: Delete all order items
+    const orderItems = await getAll("order_items");
+    const itemsToDelete = orderItems.filter(item => item.order_id === id);
+    
+    console.log(`Deleting ${itemsToDelete.length} order items...`);
+    for (const item of itemsToDelete) {
+      try {
+        await remove("order_items", item.id);
+      } catch (err) {
+        console.warn(`Failed to delete order item ${item.id}:`, err.message);
+      }
+    }
+
+    // Step 3: Delete all status history entries
+    const statusHistory = await getAll("order_status_history");
+    const historyToDelete = statusHistory.filter(h => h.order_id === id);
+    
+    console.log(`Deleting ${historyToDelete.length} status history entries...`);
+    for (const history of historyToDelete) {
+      try {
+        await remove("order_status_history", history.id);
+      } catch (err) {
+        console.warn(`Failed to delete status history ${history.id}:`, err.message);
+      }
+    }
+
+    // Step 4: Delete the order itself
+    await remove("orders", id);
+
+    console.log(`✅ Order ${id} and all related records deleted successfully`);
+
+    res.json({
+      success: true,
+      message: "Order deleted successfully",
+      data: {
+        orderId: id,
+        deletedItems: itemsToDelete.length,
+        deletedHistory: historyToDelete.length
+      }
+    });
+
+  } catch (error) {
+    console.error("Delete order error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete order",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * GET /api/orders/stats/orders - Get order statistics
+ * Returns count of orders created today
+ */
+export async function getOrderStats(req, res) {
+  try {
+    console.log("Fetching order statistics...");
+
+    // Get all orders
+    const orders = await getAll("orders");
+    
+    // Get today's date (start of day)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Count orders created today (exclude cancelled)
+    const ordersToday = orders.filter(order => {
+      if (!order.created_at) return false;
+      
+      const orderDate = new Date(order.created_at);
+      orderDate.setHours(0, 0, 0, 0);
+      
+      // Exclude cancelled orders
+      return orderDate.getTime() === today.getTime() && 
+             order.order_status !== 'cancelled';
+    });
+
+    res.json({
+      success: true,
+      data: {
+        orders_today: ordersToday.length
+      }
+    });
+
+  } catch (error) {
+    console.error("Get order stats error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch order statistics",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * GET /api/orders/integrity-check - Check data integrity
+ * Returns information about orphaned records
+ */
+export async function checkDataIntegrity(req, res) {
+  try {
+    console.log("Running data integrity check...");
+
+    const orders = await getAll("orders");
+    const orderItems = await getAll("order_items");
+    const statusHistory = await getAll("order_status_history");
+
+    // Find orphaned order items (items without parent order)
+    const validOrderIds = new Set(orders.map(o => o.id));
+    const orphanedItems = orderItems.filter(item => !validOrderIds.has(item.order_id));
+
+    // Find orphaned status history (history without parent order)
+    const orphanedHistory = statusHistory.filter(h => !validOrderIds.has(h.order_id));
+
+    // Find orders without items (orphaned orders)
+    const ordersWithoutItems = orders.filter(order => {
+      return !orderItems.some(item => item.order_id === order.id);
+    });
+
+    const hasIssues = orphanedItems.length > 0 || orphanedHistory.length > 0 || ordersWithoutItems.length > 0;
+
+    res.json({
+      success: true,
+      hasIssues,
+      data: {
+        totalOrders: orders.length,
+        totalOrderItems: orderItems.length,
+        totalStatusHistory: statusHistory.length,
+        orphanedOrderItems: orphanedItems.length,
+        orphanedStatusHistory: orphanedHistory.length,
+        ordersWithoutItems: ordersWithoutItems.length,
+        details: {
+          orphanedItems: orphanedItems.map(i => ({
+            id: i.id,
+            orderId: i.order_id,
+            itemName: i.item_name
+          })),
+          orphanedHistory: orphanedHistory.map(h => ({
+            id: h.id,
+            orderId: h.order_id
+          })),
+          ordersWithoutItems: ordersWithoutItems.map(o => ({
+            id: o.id,
+            customerName: o.customer_name
+          }))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Data integrity check error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check data integrity",
       error: error.message
     });
   }
