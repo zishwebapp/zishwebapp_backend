@@ -1,0 +1,61 @@
+export const sheetsConfig = {
+  users: {
+    sheetName: "Users",
+    columns: ["id", "name", "email", "password", "created_at"],
+    headers: ["User ID", "Full Name", "Email Address", "Password Hash", "Registration Date"]
+  },
+
+  menu_items: {
+    sheetName: "Menu_Items",
+    columns: ["id", "item_name", "price", "category", "availability"],
+    headers: ["Item ID", "Item Name", "Price", "Category", "Availability Status"]
+  },
+
+  orders: {
+    sheetName: "Orders",
+    columns: ["id", "user_id", "total_amount", "created_at"],
+    headers: ["Order ID", "User ID", "Total Amount", "Order Date"]
+  },
+
+  order_items: {
+    sheetName: "Order_Items",
+    columns: ["id", "order_id", "menu_item_id", "quantity", "price"],
+    headers: ["Item ID", "Order ID", "Menu Item ID", "Quantity", "Price"]
+  },
+
+  order_status_history: {
+    sheetName: "Order_Status_History",
+    columns: ["id", "order_id", "status", "timestamp"],
+    headers: ["History ID", "Order ID", "Status", "Timestamp"]
+  },
+
+  feedback: {
+    sheetName: "Feedback",
+    columns: ["id", "order_id", "rating", "comment", "created_at"],
+    headers: ["Feedback ID", "Order ID", "Rating", "Comment", "Submission Date"]
+  },
+
+  inventory_items: {
+    sheetName: "Inventory_Items",
+    columns: ["id", "name", "unit", "current_stock", "reorder_level"],
+    headers: ["Item ID", "Item Name", "Unit", "Current Stock", "Reorder Level"]
+  },
+
+  inventory_orders: {
+    sheetName: "Inventory_Orders",
+    columns: ["id", "supplier_name", "total_cost", "created_at"],
+    headers: ["Order ID", "Supplier Name", "Total Cost", "Order Date"]
+  },
+
+  inventory_order_items: {
+    sheetName: "Inventory_Order_Items",
+    columns: ["id", "inventory_order_id", "inventory_item_id", "quantity", "cost"],
+    headers: ["Line Item ID", "Inventory Order ID", "Inventory Item ID", "Quantity", "Cost"]
+  },
+
+  inventory_order_status_history: {
+    sheetName: "Inventory_Order_Status_History",
+    columns: ["id", "inventory_order_id", "status", "timestamp"],
+    headers: ["History ID", "Inventory Order ID", "Status", "Timestamp"]
+  }
+};
