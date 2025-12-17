@@ -7,6 +7,7 @@ import menuRoutes from "./routes/menuRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import statsRoutes from "./routes/statsRoutes.js";
+import feedbackRoutes from "./routes/feedbackRoutes.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -155,6 +156,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 
 const PORT = process.env.PORT || 3000;

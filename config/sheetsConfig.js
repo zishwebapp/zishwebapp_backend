@@ -31,8 +31,8 @@ export const sheetsConfig = {
 
   feedback: {
     sheetName: "Feedback",
-    columns: ["id", "order_id", "rating", "comment", "created_at"],
-    headers: ["Feedback ID", "Order ID", "Rating", "Comment", "Submission Date"]
+    columns: ["id", "customer_name", "email", "rating", "feedback", "created_at"],
+    headers: ["Feedback ID", "Customer Name", "Email", "Rating", "Feedback", "Submission Date"]
   },
 
   inventory_items: {
