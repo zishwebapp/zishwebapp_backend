@@ -6,6 +6,7 @@ import cors from "cors";
 import menuRoutes from "./routes/menuRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import statsRoutes from "./routes/statsRoutes.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -153,6 +154,7 @@ app.get("/api/test-sheets", async (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/stats", statsRoutes);
 
 
 const PORT = process.env.PORT || 3000;
