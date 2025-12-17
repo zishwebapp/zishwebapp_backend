@@ -60,6 +60,7 @@ app.get("/api/fix-sheet-headers", async (req, res) => {
     
     const prefix = getQuarterPrefix();
     const updatedTabs = [];
+    const errors = [];
     
     // Fix headers for each table
     for (const [key, config] of Object.entries(sheetsConfig)) {
@@ -77,9 +78,17 @@ app.get("/api/fix-sheet-headers", async (req, res) => {
         });
         
         console.log(`✅ Fixed headers for: ${tabName}`);
-        updatedTabs.push(tabName);
+        updatedTabs.push({
+          tab: tabName,
+          table: key,
+          headers: config.headers
+        });
       } catch (error) {
         console.log(`⚠️  Skipped ${tabName}: ${error.message}`);
+        errors.push({
+          tab: tabName,
+          error: error.message
+        });
       }
     }
     
@@ -87,6 +96,7 @@ app.get("/api/fix-sheet-headers", async (req, res) => {
       success: true,
       message: "Headers updated successfully",
       updatedTabs,
+      errors,
       note: "All existing quarterly tabs now have correct column headers matching the data structure"
     });
     
