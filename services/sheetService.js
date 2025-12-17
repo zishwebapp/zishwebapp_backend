@@ -5,6 +5,10 @@ import {
   getQuarterlyTabName
 } from "./quarterlySheets.js";
 
+// Simple in-memory cache to reduce Google Sheets API calls
+const cache = new Map();
+const CACHE_TTL = 30000; // 30 seconds cache
+
 /**
  * Converts Google Sheets row array → object using column config.
  */
@@ -28,9 +32,39 @@ function objectToRow(tableKey, obj) {
 }
 
 /**
- * Get all rows for current quarter.
+ * Clear cache for a specific table or all tables
+ */
+export function clearCache(tableKey) {
+  if (tableKey) {
+    // Clear specific table cache
+    for (const key of cache.keys()) {
+      if (key.startsWith(`${tableKey}-`)) {
+        cache.delete(key);
+      }
+    }
+  } else {
+    // Clear all cache
+    cache.clear();
+  }
+  console.log(`🗑️  Cache cleared for: ${tableKey || 'ALL'}`);
+}
+
+/**
+ * Get all rows for current quarter (with caching).
  */
 export async function getAll(tableKey) {
+  // Create cache key with table and time bucket (30s intervals)
+  const timeBucket = Math.floor(Date.now() / CACHE_TTL);
+  const cacheKey = `${tableKey}-${timeBucket}`;
+
+  // Check cache first
+  if (cache.has(cacheKey)) {
+    console.log(`✅ Cache HIT: ${tableKey} (saved API call)`);
+    return cache.get(cacheKey);
+  }
+
+  console.log(`📡 Cache MISS: ${tableKey} (fetching from Google Sheets)`);
+
   const sheets = await getSheetsClient();
   const spreadsheetId = process.env.MASTER_SPREADSHEET_ID;
 
@@ -47,7 +81,21 @@ export async function getAll(tableKey) {
   });
 
   const rows = res.data.values || [];
-  return rows.map(r => rowToObject(tableKey, r));
+  const data = rows.map(r => rowToObject(tableKey, r));
+
+  // Store in cache
+  cache.set(cacheKey, data);
+
+  // Auto-cleanup old cache entries (older than 2 minutes)
+  const cutoffTime = timeBucket - 4; // 4 buckets ago = 2 minutes
+  for (const key of cache.keys()) {
+    const keyTimeBucket = parseInt(key.split('-').pop());
+    if (keyTimeBucket < cutoffTime) {
+      cache.delete(key);
+    }
+  }
+
+  return data;
 }
 
 /**
@@ -103,6 +151,9 @@ export async function create(tableKey, data) {
     }
   });
 
+  // Clear cache for this table
+  clearCache(tableKey);
+
   return data;
 }
 
@@ -132,6 +183,9 @@ export async function bulkCreate(tableKey, dataArray) {
       values: rows
     }
   });
+
+  // Clear cache for this table
+  clearCache(tableKey);
 
   return dataArray;
 }
@@ -163,6 +217,9 @@ export async function update(tableKey, id, updates) {
       values: [newRow]
     }
   });
+
+  // Clear cache for this table
+  clearCache(tableKey);
 
   return updated;
 }
@@ -203,6 +260,9 @@ export async function remove(tableKey, id) {
       ]
     }
   });
+
+  // Clear cache for this table
+  clearCache(tableKey);
 
   return true;
 }

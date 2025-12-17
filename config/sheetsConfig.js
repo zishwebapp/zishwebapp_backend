@@ -37,25 +37,19 @@ export const sheetsConfig = {
 
   inventory_items: {
     sheetName: "Inventory_Items",
-    columns: ["id", "name", "unit", "current_stock", "reorder_level"],
-    headers: ["Item ID", "Item Name", "Unit", "Current Stock", "Reorder Level"]
+    columns: ["id", "name", "unit_label", "rate", "category", "status", "current_stock", "reorder_level", "created_by", "created_at"],
+    headers: ["Item ID", "Item Name", "Unit", "Rate (₹)", "Category", "Status", "Current Stock", "Reorder Level", "Created By", "Created Date"]
   },
 
   inventory_orders: {
     sheetName: "Inventory_Orders",
-    columns: ["id", "supplier_name", "total_cost", "created_at"],
-    headers: ["Order ID", "Supplier Name", "Total Cost", "Order Date"]
+    columns: ["id", "ordered_by", "total_amount", "status", "ordered_at", "purchased_at", "purchased_by", "notes"],
+    headers: ["Order ID", "Ordered By", "Total Amount (₹)", "Status", "Ordered Date", "Purchased Date", "Purchased By", "Notes"]
   },
 
   inventory_order_items: {
     sheetName: "Inventory_Order_Items",
-    columns: ["id", "inventory_order_id", "inventory_item_id", "quantity", "cost"],
-    headers: ["Line Item ID", "Inventory Order ID", "Inventory Item ID", "Quantity", "Cost"]
-  },
-
-  inventory_order_status_history: {
-    sheetName: "Inventory_Order_Status_History",
-    columns: ["id", "inventory_order_id", "status", "timestamp"],
-    headers: ["History ID", "Inventory Order ID", "Status", "Timestamp"]
+    columns: ["id", "inventory_order_id", "inventory_item_id", "item_name", "unit", "rate", "quantity", "line_amount"],
+    headers: ["Line Item ID", "Order ID", "Item ID", "Item Name", "Unit", "Rate (₹)", "Quantity", "Line Amount (₹)"]
   }
 };

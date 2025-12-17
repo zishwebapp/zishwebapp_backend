@@ -8,6 +8,7 @@ import orderRoutes from "./routes/orderRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import statsRoutes from "./routes/statsRoutes.js";
 import feedbackRoutes from "./routes/feedbackRoutes.js";
+import inventoryRoutes from "./routes/inventoryRoutes.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -47,6 +48,23 @@ console.log("🔑 GOOGLE_PROJECT_CREDENTIALS:", process.env.GOOGLE_PROJECT_CREDE
 console.log("📁 GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS ? `✅ Set (${process.env.GOOGLE_APPLICATION_CREDENTIALS})` : "❌ Not set");
 console.log("📊 MASTER_SPREADSHEET_ID:", process.env.MASTER_SPREADSHEET_ID ? "✅ Set" : "❌ Not set");
 console.log("🌐 FRONTEND_URL:", process.env.FRONTEND_URL || "Not set (defaulting to localhost:3001)");
+
+// Clear cache endpoint (for debugging)
+app.get("/api/clear-cache", async (req, res) => {
+  try {
+    const { clearCache } = await import("./services/sheetService.js");
+    clearCache(); // Clear all cache
+    res.json({
+      success: true,
+      message: "Cache cleared successfully"
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 
 // Fix headers in existing quarterly tabs
 app.get("/api/fix-sheet-headers", async (req, res) => {
@@ -167,6 +185,7 @@ app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/feedback", feedbackRoutes);
+app.use("/api/inventory", inventoryRoutes);
 
 
 const PORT = process.env.PORT || 3000;

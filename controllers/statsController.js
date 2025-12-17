@@ -182,6 +182,170 @@ export async function getDashboardStats(req, res) {
 }
 
 /**
+ * GET /api/stats/orders-insights - Get completed orders insights
+ * Returns insights for orders with order_status = 'completed'
+ */
+export async function getOrdersInsights(req, res) {
+  try {
+    const { start, end } = req.query;
+    console.log(`Fetching orders insights: ${start} to ${end}`);
+
+    // Get all orders and order items
+    const orders = await getAll("orders");
+    const orderItems = await getAll("order_items");
+
+    // Get date range (default to current month)
+    const now = new Date();
+    const startDate = start ? new Date(start) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = end ? new Date(end) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // Filter completed orders within date range (exclude cancelled)
+    const completedOrders = orders.filter(order => {
+      if (!order.created_at || order.order_status !== 'completed') return false;
+      const orderDate = new Date(order.created_at);
+      return orderDate >= startDate && orderDate <= endDate;
+    });
+
+    // Calculate metrics
+    const completedOrdersCount = completedOrders.length;
+    const completedOrdersAmount = completedOrders.reduce((sum, order) => {
+      return sum + (Number(order.total_amount) || 0);
+    }, 0);
+
+    // Get items from completed orders only
+    const completedOrderIds = new Set(completedOrders.map(order => order.id));
+    const completedOrderItems = orderItems.filter(item => completedOrderIds.has(item.order_id));
+
+    // Count total items sold
+    const totalItemsSold = completedOrderItems.reduce((sum, item) => {
+      return sum + (Number(item.quantity) || 0);
+    }, 0);
+
+    // Top items by quantity
+    const itemQuantities = {};
+    completedOrderItems.forEach(item => {
+      const itemName = item.item_name;
+      const quantity = Number(item.quantity) || 0;
+      
+      if (!itemQuantities[itemName]) {
+        itemQuantities[itemName] = 0;
+      }
+      itemQuantities[itemName] += quantity;
+    });
+
+    const topItems = Object.entries(itemQuantities)
+      .map(([item_name, total_quantity]) => ({
+        item_name,
+        total_quantity
+      }))
+      .sort((a, b) => b.total_quantity - a.total_quantity)
+      .slice(0, 20); // Top 20 items
+
+    res.json({
+      success: true,
+      data: {
+        start: startDate.toISOString().split('T')[0],
+        end: endDate.toISOString().split('T')[0],
+        completed_orders_count: completedOrdersCount,
+        completed_orders_amount: completedOrdersAmount,
+        total_items_sold: totalItemsSold,
+        top_items: topItems
+      }
+    });
+
+  } catch (error) {
+    console.error("Get orders insights error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch orders insights",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * GET /api/stats/sales - Get paid sales insights
+ * Returns insights for orders with payment_status = 'paid' (regardless of order_status)
+ */
+export async function getSalesInsights(req, res) {
+  try {
+    const { start, end } = req.query;
+    console.log(`Fetching sales insights: ${start} to ${end}`);
+
+    // Get all orders and order items
+    const orders = await getAll("orders");
+    const orderItems = await getAll("order_items");
+
+    // Get date range (default to current month)
+    const now = new Date();
+    const startDate = start ? new Date(start) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = end ? new Date(end) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // Filter paid orders within date range (exclude cancelled)
+    const paidOrders = orders.filter(order => {
+      if (!order.created_at || order.payment_status !== 'paid' || order.order_status === 'cancelled') return false;
+      const orderDate = new Date(order.created_at);
+      return orderDate >= startDate && orderDate <= endDate;
+    });
+
+    // Calculate total sales (paid orders only)
+    const totalSales = paidOrders.reduce((sum, order) => {
+      return sum + (Number(order.total_amount) || 0);
+    }, 0);
+
+    // Get items from paid orders only
+    const paidOrderIds = new Set(paidOrders.map(order => order.id));
+    const paidOrderItems = orderItems.filter(item => paidOrderIds.has(item.order_id));
+
+    // Count total items sold (from paid orders)
+    const totalItemsSold = paidOrderItems.reduce((sum, item) => {
+      return sum + (Number(item.quantity) || 0);
+    }, 0);
+
+    // Top items by quantity (from paid orders)
+    const itemQuantities = {};
+    paidOrderItems.forEach(item => {
+      const itemName = item.item_name;
+      const quantity = Number(item.quantity) || 0;
+      
+      if (!itemQuantities[itemName]) {
+        itemQuantities[itemName] = 0;
+      }
+      itemQuantities[itemName] += quantity;
+    });
+
+    const topItems = Object.entries(itemQuantities)
+      .map(([item_name, total_quantity]) => ({
+        item_name,
+        total_quantity
+      }))
+      .sort((a, b) => b.total_quantity - a.total_quantity)
+      .slice(0, 20); // Top 20 items
+
+    res.json({
+      success: true,
+      data: {
+        start: startDate.toISOString().split('T')[0],
+        end: endDate.toISOString().split('T')[0],
+        total_sales: totalSales,
+        completed_orders_count: paidOrders.length,
+        completed_orders_amount: totalSales,
+        total_items_sold: totalItemsSold,
+        top_items: topItems
+      }
+    });
+
+  } catch (error) {
+    console.error("Get sales insights error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sales insights",
+      error: error.message
+    });
+  }
+}
+
+/**
  * GET /api/stats/dashboard/export - Export dashboard data as CSV
  */
 export async function exportDashboardData(req, res) {
