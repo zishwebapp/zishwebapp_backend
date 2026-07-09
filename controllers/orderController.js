@@ -1,4 +1,6 @@
 import { getAll, create, bulkCreate, getById } from "../services/sheetService.js";
+import { generateId } from "../services/idGenerator.js";
+import { isMenuItemAvailable } from "../services/menuAvailability.js";
 
 /**
  * POST /api/orders - Place a new order
@@ -16,7 +18,7 @@ export async function placeOrder(req, res) {
     }
 
     // Generate unique order ID
-    const orderId = `ORD-${Date.now()}`;
+    const orderId = generateId("ORD");
     console.log(`Creating order: ${orderId} for ${customerName}`);
 
     // Fetch all menu items to validate and get prices
@@ -37,8 +39,7 @@ export async function placeOrder(req, res) {
       }
 
       // Check availability
-      const avail = (menuItem.availability || "").toLowerCase();
-      if (avail !== "available" && avail !== "true"){
+      if (!isMenuItemAvailable(menuItem.availability)) {
         return res.status(400).json({
           success: false,
           message: `Menu item "${menuItem.item_name}" is not available`
@@ -85,7 +86,7 @@ export async function placeOrder(req, res) {
 
     // Create initial status history entry
     await create("order_status_history", {
-      id: `OSH-${Date.now()}`,
+      id: generateId("OSH"),
       order_id: orderId,
       old_status: "",
       new_status: "pending",
@@ -297,7 +298,7 @@ export async function updateOrderStatus(req, res) {
 
     // Create status history entry
     await create("order_status_history", {
-      id: `OSH-${Date.now()}`,
+      id: generateId("OSH"),
       order_id: id,
       old_status: oldStatus,
       new_status: status,
@@ -455,8 +456,8 @@ export async function deleteOrder(req, res) {
     const { id } = req.params;
     console.log(`Deleting order: ${id}`);
 
-    // Import remove function
-    const { remove } = await import("../services/sheetService.js");
+    // Import remove functions
+    const { remove, removeMultiple } = await import("../services/sheetService.js");
 
     // Step 1: Verify order exists
     const orderResult = await getById("orders", id);
@@ -467,31 +468,19 @@ export async function deleteOrder(req, res) {
       });
     }
 
-    // Step 2: Delete all order items
+    // Step 2: Delete all order items (single batched request instead of one call per row)
     const orderItems = await getAll("order_items");
     const itemsToDelete = orderItems.filter(item => item.order_id === id);
-    
-    console.log(`Deleting ${itemsToDelete.length} order items...`);
-    for (const item of itemsToDelete) {
-      try {
-        await remove("order_items", item.id);
-      } catch (err) {
-        console.warn(`Failed to delete order item ${item.id}:`, err.message);
-      }
-    }
 
-    // Step 3: Delete all status history entries
+    console.log(`Deleting ${itemsToDelete.length} order items...`);
+    await removeMultiple("order_items", itemsToDelete.map(item => item.id));
+
+    // Step 3: Delete all status history entries (single batched request)
     const statusHistory = await getAll("order_status_history");
     const historyToDelete = statusHistory.filter(h => h.order_id === id);
-    
+
     console.log(`Deleting ${historyToDelete.length} status history entries...`);
-    for (const history of historyToDelete) {
-      try {
-        await remove("order_status_history", history.id);
-      } catch (err) {
-        console.warn(`Failed to delete status history ${history.id}:`, err.message);
-      }
-    }
+    await removeMultiple("order_status_history", historyToDelete.map(h => h.id));
 
     // Step 4: Delete the order itself
     await remove("orders", id);

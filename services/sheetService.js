@@ -2,7 +2,9 @@ import { getSheetsClient } from "./googleAuth.js";
 import { sheetsConfig } from "../config/sheetsConfig.js";
 import {
   ensureQuarterlyTabs,
-  getQuarterlyTabName
+  getQuarterlyTabName,
+  getPreviousQuarterlyTabName,
+  getSheetIdForTab
 } from "./quarterlySheets.js";
 
 // Simple in-memory cache to reduce Google Sheets API calls
@@ -99,7 +101,42 @@ export async function getAll(tableKey) {
 }
 
 /**
- * Get row by ID for current quarter.
+ * Look for a row with matching ID inside a specific tab.
+ * Returns null if the tab doesn't exist yet or the row isn't in it.
+ */
+async function findInTab(sheets, spreadsheetId, tableKey, id, tabName) {
+  const columns = sheetsConfig[tableKey].columns;
+  const idIndex = columns.indexOf("id");
+
+  let res;
+  try {
+    res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tabName}!A2:Z`
+    });
+  } catch (err) {
+    return null; // tab doesn't exist (e.g. no previous-quarter tab yet)
+  }
+
+  const rows = res.data.values || [];
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][idIndex] == id) {
+      return {
+        data: rowToObject(tableKey, rows[i]),
+        rowIndex: i + 2, // because A1 = headers, A2 = first data
+        tabName
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get row by ID. Checks the current quarter's tab first; for partitioned
+ * tables, falls back to the previous quarter's tab so records created near
+ * a quarter boundary stay reachable for updates/deletes after the rollover.
  */
 export async function getById(tableKey, id) {
   const sheets = await getSheetsClient();
@@ -108,26 +145,13 @@ export async function getById(tableKey, id) {
   await ensureQuarterlyTabs();
   const tabName = getQuarterlyTabName(tableKey);
 
-  const columns = sheetsConfig[tableKey].columns;
-  const idIndex = columns.indexOf("id");
+  const found = await findInTab(sheets, spreadsheetId, tableKey, id, tabName);
+  if (found) return found;
 
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${tabName}!A2:Z`
-  });
+  const prevTabName = getPreviousQuarterlyTabName(tableKey);
+  if (!prevTabName) return null;
 
-  const rows = res.data.values || [];
-
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i][idIndex] == id) {
-      return {
-        data: rowToObject(tableKey, rows[i]),
-        rowIndex: i + 2 // because A1 = headers, A2 = first data
-      };
-    }
-  }
-
-  return null;
+  return findInTab(sheets, spreadsheetId, tableKey, id, prevTabName);
 }
 
 /**
@@ -198,7 +222,6 @@ export async function update(tableKey, id, updates) {
   const spreadsheetId = process.env.MASTER_SPREADSHEET_ID;
 
   await ensureQuarterlyTabs();
-  const tabName = getQuarterlyTabName(tableKey);
 
   const found = await getById(tableKey, id);
   if (!found) return null;
@@ -209,9 +232,11 @@ export async function update(tableKey, id, updates) {
   const columns = sheetsConfig[tableKey].columns;
   const lastCol = String.fromCharCode("A".charCodeAt(0) + columns.length - 1);
 
+  // Write back to whichever tab the record was actually found in
+  // (current quarter, or the previous quarter's tab).
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${tabName}!A${found.rowIndex}:${lastCol}${found.rowIndex}`,
+    range: `${found.tabName}!A${found.rowIndex}:${lastCol}${found.rowIndex}`,
     valueInputOption: "USER_ENTERED",
     resource: {
       values: [newRow]
@@ -225,21 +250,21 @@ export async function update(tableKey, id, updates) {
 }
 
 /**
- * Delete a row by ID (current quarter only).
+ * Delete a row by ID. Looks in the current quarter's tab, falling back to
+ * the previous quarter's tab (see getById), so records aren't "lost" right
+ * after a quarter rollover.
  */
 export async function remove(tableKey, id) {
   const sheets = await getSheetsClient();
   const spreadsheetId = process.env.MASTER_SPREADSHEET_ID;
 
   await ensureQuarterlyTabs();
-  const tabName = getQuarterlyTabName(tableKey);
 
   const found = await getById(tableKey, id);
   if (!found) return false;
 
-  const rowIndex = found.rowIndex;
+  const sheetId = await getSheetIdForTab(sheets, spreadsheetId, found.tabName);
 
-  // Delete row from tab
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
@@ -247,13 +272,10 @@ export async function remove(tableKey, id) {
         {
           deleteDimension: {
             range: {
-              sheetId: getSheetIdFromName(
-                (await sheets.spreadsheets.get({ spreadsheetId })).data.sheets,
-                tabName
-              ),
+              sheetId,
               dimension: "ROWS",
-              startIndex: rowIndex - 1,
-              endIndex: rowIndex
+              startIndex: found.rowIndex - 1,
+              endIndex: found.rowIndex
             }
           }
         }
@@ -268,10 +290,78 @@ export async function remove(tableKey, id) {
 }
 
 /**
- * Helper: Get Google Sheets sheetId by title.
+ * Delete multiple rows by ID in one batch. Far cheaper than calling remove()
+ * in a loop: one values.get() per tab (instead of one per row) and a single
+ * batchUpdate carrying all the deleteDimension requests for that tab.
+ * Checks the current quarter's tab and, for partitioned tables, the
+ * previous quarter's tab too.
  */
-function getSheetIdFromName(sheetsList, title) {
-  const sheet = sheetsList.find(s => s.properties.title === title);
-  if (!sheet) throw new Error(`Tab '${title}' not found`);
-  return sheet.properties.sheetId;
+export async function removeMultiple(tableKey, ids) {
+  if (!ids || ids.length === 0) return 0;
+
+  const sheets = await getSheetsClient();
+  const spreadsheetId = process.env.MASTER_SPREADSHEET_ID;
+
+  await ensureQuarterlyTabs();
+
+  const idSet = new Set(ids.map(String));
+  const columns = sheetsConfig[tableKey].columns;
+  const idIndex = columns.indexOf("id");
+
+  const tabsToCheck = [getQuarterlyTabName(tableKey)];
+  const prevTabName = getPreviousQuarterlyTabName(tableKey);
+  if (prevTabName) tabsToCheck.push(prevTabName);
+
+  let deletedCount = 0;
+
+  for (const tabName of tabsToCheck) {
+    let res;
+    try {
+      res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${tabName}!A2:Z`
+      });
+    } catch (err) {
+      continue; // tab doesn't exist
+    }
+
+    const rows = res.data.values || [];
+    const rowIndexesToDelete = [];
+
+    rows.forEach((row, i) => {
+      if (idSet.has(String(row[idIndex]))) {
+        rowIndexesToDelete.push(i + 2); // A1 = headers, A2 = first data row
+      }
+    });
+
+    if (rowIndexesToDelete.length === 0) continue;
+
+    const sheetId = await getSheetIdForTab(sheets, spreadsheetId, tabName);
+
+    // Descending order: deleting from the bottom up means each deletion
+    // doesn't shift the row index of the ones still queued up above it.
+    rowIndexesToDelete.sort((a, b) => b - a);
+
+    const requests = rowIndexesToDelete.map(rowIndex => ({
+      deleteDimension: {
+        range: {
+          sheetId,
+          dimension: "ROWS",
+          startIndex: rowIndex - 1,
+          endIndex: rowIndex
+        }
+      }
+    }));
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      resource: { requests }
+    });
+
+    deletedCount += rowIndexesToDelete.length;
+  }
+
+  clearCache(tableKey);
+
+  return deletedCount;
 }

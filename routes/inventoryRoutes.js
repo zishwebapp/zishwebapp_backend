@@ -1,31 +1,20 @@
 import express from "express";
-import { 
-  getInventoryItems,
-  createInventoryItem,
-  updateInventoryItem,
-  deleteInventoryItem,
-  placeInventoryOrder,
-  listInventoryOrders,
-  markOrderPurchased,
-  getInventoryInsights,
-  exportInventoryInsights
+import {
+  createInventoryEntry,
+  listInventoryEntries,
+  updateInventoryEntry,
+  markEntryPurchased,
+  deleteInventoryEntry,
+  duplicateInventoryEntry
 } from "../controllers/inventoryController.js";
 
 const router = express.Router();
 
-// Inventory Items routes
-router.get("/items", getInventoryItems);                            // Get all inventory items (with status filter)
-router.post("/items", createInventoryItem);                         // Create new inventory item
-router.put("/items/:id", updateInventoryItem);                      // Update inventory item
-router.delete("/items/:id", deleteInventoryItem);                   // Delete inventory item
-
-// Inventory Orders routes
-router.post("/orders", placeInventoryOrder);                        // Place inventory order
-router.get("/orders", listInventoryOrders);                         // List inventory orders (with filters)
-router.put("/orders/:id/purchased", markOrderPurchased);            // Mark order as purchased
-
-// Inventory Insights routes
-router.get("/insights/export", exportInventoryInsights);            // Export insights as CSV (must be before /insights)
-router.get("/insights", getInventoryInsights);                      // Get inventory insights
+router.get("/entries", listInventoryEntries);                       // List entries (range/status/search filters)
+router.post("/entries", createInventoryEntry);                      // Add entry (one popup)
+router.put("/entries/:id", updateInventoryEntry);                   // Edit entry
+router.patch("/entries/:id/purchase", markEntryPurchased);          // One-click Mark Purchased
+router.delete("/entries/:id", deleteInventoryEntry);                // Delete entry
+router.post("/entries/:id/duplicate", duplicateInventoryEntry);     // Duplicate entry
 
 export default router;

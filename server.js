@@ -9,6 +9,8 @@ import authRoutes from "./routes/authRoutes.js";
 import statsRoutes from "./routes/statsRoutes.js";
 import feedbackRoutes from "./routes/feedbackRoutes.js";
 import inventoryRoutes from "./routes/inventoryRoutes.js";
+import salesRoutes from "./routes/salesRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
 
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -66,24 +68,27 @@ app.get("/api/clear-cache", async (req, res) => {
   }
 });
 
-// Fix headers in existing quarterly tabs
+// Create any missing tabs, then fix headers on every tab (existing or just-created)
 app.get("/api/fix-sheet-headers", async (req, res) => {
   try {
     console.log("=== Fixing Sheet Headers ===");
-    
+
+    // Create any missing tabs first, so this endpoint repairs AND creates
+    // instead of erroring out on tabs that don't exist yet.
+    await ensureQuarterlyTabs();
+
     const sheets = await (await import("./services/googleAuth.js")).getSheetsClient();
     const spreadsheetId = process.env.MASTER_SPREADSHEET_ID;
     const { sheetsConfig } = await import("./config/sheetsConfig.js");
-    const { getQuarterPrefix } = await import("./services/quarterlySheets.js");
-    
-    const prefix = getQuarterPrefix();
+    const { getQuarterlyTabName } = await import("./services/quarterlySheets.js");
+
     const updatedTabs = [];
     const errors = [];
-    
-    // Fix headers for each table
+
+    // Fix headers for each table (respects each table's partitioned tab name)
     for (const [key, config] of Object.entries(sheetsConfig)) {
-      const tabName = `${prefix}_${config.sheetName}`;
-      
+      const tabName = getQuarterlyTabName(key);
+
       try {
         // Update header row with correct headers
         await sheets.spreadsheets.values.update({
@@ -137,31 +142,44 @@ app.get("/api/test-sheets", async (req, res) => {
     const prefix = await ensureQuarterlyTabs();
     console.log(`Step 1 Complete: Quarter prefix is ${prefix}`);
     
-    console.log(`Step 2: Preparing to insert ${menuData.menu.length} menu items...`);
-    
+    console.log(`Step 2: Clearing existing menu_items data before reseeding...`);
+
+    // Clear existing rows first — menu_items uses append-only inserts, so
+    // without this, calling this endpoint more than once duplicates every item.
+    const { getSheetsClient } = await import("./services/googleAuth.js");
+    const { getQuarterlyTabName } = await import("./services/quarterlySheets.js");
+    const sheets = await getSheetsClient();
+    const menuTabName = getQuarterlyTabName("menu_items");
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.MASTER_SPREADSHEET_ID,
+      range: `${menuTabName}!A2:Z`
+    });
+
+    console.log(`Step 3: Preparing to insert ${menuData.menu.length} menu items...`);
+
     // Map all menu items to the correct format matching sheetsConfig columns
     const formattedItems = menuData.menu.map(item => ({
       id: item.id,
       item_name: item.name,
       price: item.price,
       category: item.category_id,
-      availability: String(item.is_available).toLowerCase() === 'true' ? 'true' : 'available'
+      availability: String(item.is_available).toLowerCase() === 'true' ? 'available' : 'unavailable'
     }));
-    
+
     console.log(`Inserting ${formattedItems.length} items using bulk insert...`);
-    
+
     // Use bulk insert for efficiency
     await bulkCreate("menu_items", formattedItems);
-    
-    console.log(`Step 2 Complete: Successfully inserted ${formattedItems.length} menu items`);
+
+    console.log(`Step 3 Complete: Successfully inserted ${formattedItems.length} menu items`);
     
     res.json({
       success: true,
-      message: "Quarterly tabs created and menu items inserted successfully",
+      message: "Tabs created/verified and menu items reseeded successfully",
       quarter: prefix,
       itemsInserted: formattedItems.length,
       totalItems: menuData.menu.length,
-      note: "All quarterly tabs have been created with correct column headers"
+      note: "Menu_Items was cleared before reseeding, so this is safe to call again without creating duplicates"
     });
   } catch (err) {
     console.error("=== CRITICAL ERROR in test-sheets API ===");
@@ -186,6 +204,8 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/feedback", feedbackRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/sales", salesRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 
 const PORT = process.env.PORT || 3000;

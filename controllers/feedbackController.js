@@ -1,4 +1,5 @@
 import { getAll, create } from "../services/sheetService.js";
+import { generateId } from "../services/idGenerator.js";
 
 /**
  * POST /api/feedback - Submit new feedback
@@ -18,7 +19,7 @@ export async function submitFeedback(req, res) {
     console.log(`Creating feedback with rating: ${rating}`);
 
     // Generate unique feedback ID
-    const feedbackId = `FB-${Date.now()}`;
+    const feedbackId = generateId("FB");
     const now = new Date();
     const timestamp = now.toISOString();
 
