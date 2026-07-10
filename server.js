@@ -162,7 +162,7 @@ app.get("/api/test-sheets", async (req, res) => {
       id: item.id,
       item_name: item.name,
       price: item.price,
-      category: item.category_id,
+      category: item.category,
       availability: String(item.is_available).toLowerCase() === 'true' ? 'available' : 'unavailable'
     }));
 

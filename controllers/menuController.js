@@ -11,7 +11,7 @@ export async function getMenuItems(req, res) {
       id: item.id ?? null,
       name: item.item_name ?? "",
       price: item.price ? Number(item.price) : null,
-      category_id: item.category ? Number(item.category) : null,
+      category: item.category || null,
       description: "", // Not stored in Google Sheets
       image_url: "", // Not stored in Google Sheets
       is_available: isMenuItemAvailable(item.availability),
