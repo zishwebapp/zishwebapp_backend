@@ -1,9 +1,13 @@
 import express from "express";
-import { 
-  placeOrder, 
-  getAllOrders, 
+import {
+  placeOrder,
+  getAllOrders,
   getOrderById,
   updateOrderStatus,
+  updateOrderItemStatus,
+  addOrderItem,
+  updateOrderItemQuantity,
+  removeOrderItem,
   updatePaymentStatus,
   getOrdersByCustomer,
   getOrderStats,
@@ -21,6 +25,10 @@ router.get("/", getAllOrders);                         // Get all orders
 router.get("/customer/:phone", getOrdersByCustomer);   // Get orders by customer phone
 router.get("/:id", getOrderById);                      // Get single order by ID
 router.put("/:id/status", updateOrderStatus);          // Update order status
+router.put("/:orderId/items/:itemId/status", updateOrderItemStatus); // Update single item delivery status
+router.post("/:orderId/items", addOrderItem);                        // Add a new item to an order
+router.put("/:orderId/items/:itemId/quantity", updateOrderItemQuantity); // Change an item's quantity
+router.delete("/:orderId/items/:itemId", removeOrderItem);           // Remove an item from an order
 router.put("/:id/payment", updatePaymentStatus);       // Update payment status
 router.delete("/:id", deleteOrder);                    // Delete order and related records
 

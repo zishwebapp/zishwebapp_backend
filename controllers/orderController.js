@@ -1,6 +1,15 @@
-import { getAll, create, bulkCreate, getById } from "../services/sheetService.js";
+import { getAll, create, bulkCreate, getById, update, remove } from "../services/sheetService.js";
 import { generateId } from "../services/idGenerator.js";
 import { isMenuItemAvailable } from "../services/menuAvailability.js";
+
+function generateOrderItemId() {
+  return `OI-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Sums subtotal across a list of order_items rows, e.g. as returned by getAll("order_items")
+function sumSubtotals(items) {
+  return items.reduce((sum, item) => sum + Number(item.subtotal), 0);
+}
 
 /**
  * POST /api/orders - Place a new order
@@ -51,14 +60,15 @@ export async function placeOrder(req, res) {
       totalAmount += subtotal;
 
       orderItemsData.push({
-        id: `OI-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateOrderItemId(),
         order_id: orderId,
         menu_item_id: menuItem.id,
         item_name: menuItem.item_name,
         item_price: itemPrice,
         quantity: item.quantity,
         subtotal: subtotal.toFixed(2),
-        special_instructions: item.specialInstructions || ""
+        special_instructions: item.specialInstructions || "",
+        item_status: "pending"
       });
     }
 
@@ -105,10 +115,12 @@ export async function placeOrder(req, res) {
         totalAmount: totalAmount.toFixed(2),
         status: "pending",
         items: orderItemsData.map(item => ({
+          id: item.id,
           itemName: item.item_name,
           quantity: item.quantity,
           price: item.item_price,
-          subtotal: item.subtotal
+          subtotal: item.subtotal,
+          itemStatus: item.item_status
         })),
         createdAt: orderData.created_at
       }
@@ -159,11 +171,13 @@ export async function getAllOrders(req, res) {
       return {
         ...order,
         items: items.map(item => ({
+          id: item.id,
           itemName: item.item_name,
           quantity: Number(item.quantity),
           price: Number(item.item_price),
           subtotal: Number(item.subtotal),
-          specialInstructions: item.special_instructions
+          specialInstructions: item.special_instructions,
+          itemStatus: item.item_status || "pending"
         })),
         itemCount: items.length,
         isOrphaned: items.length === 0 // Flag for frontend
@@ -228,11 +242,13 @@ export async function getOrderById(req, res) {
       data: {
         ...orderResult.data,
         items: items.map(item => ({
+          id: item.id,
           itemName: item.item_name,
           quantity: Number(item.quantity),
           price: Number(item.item_price),
           subtotal: Number(item.subtotal),
-          specialInstructions: item.special_instructions
+          specialInstructions: item.special_instructions,
+          itemStatus: item.item_status || "pending"
         })),
         statusHistory: statusHistory.map(h => ({
           oldStatus: h.old_status,
@@ -293,7 +309,6 @@ export async function updateOrderStatus(req, res) {
     }
 
     // Update order status (using sheetService update)
-    const { update } = await import("../services/sheetService.js");
     await update("orders", id, { order_status: status });
 
     // Create status history entry
@@ -330,6 +345,333 @@ export async function updateOrderStatus(req, res) {
 }
 
 /**
+ * PUT /api/orders/:orderId/items/:itemId/status - Update a single item's delivery status
+ * Lets the kitchen mark individual items as delivered when they go out one at a time,
+ * instead of only being able to flip the whole order's status at once.
+ */
+export async function updateOrderItemStatus(req, res) {
+  try {
+    const { orderId, itemId } = req.params;
+    const { itemStatus } = req.body;
+
+    const validItemStatuses = ["pending", "delivered"];
+    if (!validItemStatuses.includes(itemStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid item status. Must be one of: ${validItemStatuses.join(", ")}`
+      });
+    }
+
+    console.log(`Updating item ${itemId} (order ${orderId}) status to: ${itemStatus}`);
+
+    // Look these up via getAll (cached for 30s) instead of getById (which always
+    // hits the live Google Sheets API). This endpoint is called once per item
+    // tapped, so keeping it cache-friendly matters for staying under the
+    // Sheets API's 60-requests-per-minute quota (see GOOGLE_SHEETS_QUOTA_ISSUE.md).
+    const orders = await getAll("orders");
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    const allOrderItems = await getAll("order_items");
+    const item = allOrderItems.find(i => i.id === itemId && i.order_id === orderId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Order item not found"
+      });
+    }
+
+    if (order.order_status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot update items on a cancelled order"
+      });
+    }
+
+    await update("order_items", itemId, { item_status: itemStatus });
+
+    // If every item on the order is now delivered, auto-advance the order
+    // to "ready" so the order list reflects reality without a manual click.
+    // Only does this from pending/preparing so it never overrides a status
+    // an admin already set further along (ready/completed) or backward.
+    // Reuses the item list already fetched above instead of re-fetching
+    // (the write above just invalidated the cache, so a re-fetch here would
+    // force another live API call).
+    let orderStatusBumped = false;
+    if (["pending", "preparing"].includes(order.order_status)) {
+      const itemsForOrder = allOrderItems.filter(i => i.order_id === orderId);
+      const allDelivered = itemsForOrder.length > 0 &&
+        itemsForOrder.every(i =>
+          i.id === itemId ? itemStatus === "delivered" : i.item_status === "delivered"
+        );
+
+      if (allDelivered) {
+        await update("orders", orderId, { order_status: "ready" });
+        await create("order_status_history", {
+          id: generateId("OSH"),
+          order_id: orderId,
+          old_status: order.order_status,
+          new_status: "ready",
+          changed_by: "system (all items delivered)",
+          timestamp: new Date().toISOString()
+        });
+        orderStatusBumped = true;
+      }
+    }
+
+    console.log(`Item ${itemId} status updated to: ${itemStatus}`);
+
+    res.json({
+      success: true,
+      message: "Item status updated successfully",
+      data: {
+        orderId,
+        itemId,
+        itemStatus,
+        orderStatusBumpedToReady: orderStatusBumped
+      }
+    });
+
+  } catch (error) {
+    console.error("Update order item status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update item status",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * POST /api/orders/:orderId/items - Add a new item to an existing order
+ * Lets an admin add something the customer asks for after the order was placed,
+ * without needing to cancel and re-place the whole order.
+ */
+export async function addOrderItem(req, res) {
+  try {
+    const { orderId } = req.params;
+    const { menuItemId, quantity, specialInstructions } = req.body;
+
+    if (!menuItemId || !Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "menuItemId and a whole-number quantity of at least 1 are required"
+      });
+    }
+
+    const orders = await getAll("orders");
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    const menuItems = await getAll("menu_items");
+    const menuItem = menuItems.find(m => m.id == menuItemId);
+    if (!menuItem) {
+      return res.status(404).json({
+        success: false,
+        message: `Menu item with ID ${menuItemId} not found`
+      });
+    }
+
+    if (!isMenuItemAvailable(menuItem.availability)) {
+      return res.status(400).json({
+        success: false,
+        message: `Menu item "${menuItem.item_name}" is not available`
+      });
+    }
+
+    const itemPrice = Number(menuItem.price) || 0;
+    const subtotal = itemPrice * quantity;
+
+    const newItem = {
+      id: generateOrderItemId(),
+      order_id: orderId,
+      menu_item_id: menuItem.id,
+      item_name: menuItem.item_name,
+      item_price: itemPrice,
+      quantity,
+      subtotal: subtotal.toFixed(2),
+      special_instructions: specialInstructions || "",
+      item_status: "pending"
+    };
+
+    await create("order_items", newItem);
+
+    // Recalculate the order total from items already known (existing items
+    // fetched above are unaffected by this add) plus the new item, instead
+    // of re-fetching order_items and burning another Sheets API call.
+    const existingItems = await getAll("order_items");
+    const existingItemsForOrder = existingItems.filter(i => i.order_id === orderId && i.id !== newItem.id);
+    const newTotal = sumSubtotals(existingItemsForOrder) + subtotal;
+    await update("orders", orderId, { total_amount: newTotal.toFixed(2) });
+
+    console.log(`Added item "${menuItem.item_name}" x${quantity} to order ${orderId}`);
+
+    res.status(201).json({
+      success: true,
+      message: "Item added to order",
+      data: {
+        orderId,
+        item: {
+          id: newItem.id,
+          itemName: newItem.item_name,
+          quantity: newItem.quantity,
+          price: newItem.item_price,
+          subtotal: Number(newItem.subtotal),
+          itemStatus: newItem.item_status
+        },
+        newTotalAmount: newTotal.toFixed(2)
+      }
+    });
+
+  } catch (error) {
+    console.error("Add order item error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add item to order",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * PUT /api/orders/:orderId/items/:itemId/quantity - Change an existing item's quantity
+ */
+export async function updateOrderItemQuantity(req, res) {
+  try {
+    const { orderId, itemId } = req.params;
+    const { quantity } = req.body;
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be a whole number of at least 1. To remove the item entirely, use the remove option instead."
+      });
+    }
+
+    const orders = await getAll("orders");
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    const orderItems = await getAll("order_items");
+    const item = orderItems.find(i => i.id === itemId && i.order_id === orderId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Order item not found"
+      });
+    }
+
+    const newSubtotal = Number(item.item_price) * quantity;
+    await update("order_items", itemId, { quantity, subtotal: newSubtotal.toFixed(2) });
+
+    // Recompute total using the item list already in hand, swapping in the new subtotal.
+    const itemsForOrder = orderItems.filter(i => i.order_id === orderId);
+    const newTotal = itemsForOrder.reduce((sum, i) => sum + (i.id === itemId ? newSubtotal : Number(i.subtotal)), 0);
+    await update("orders", orderId, { total_amount: newTotal.toFixed(2) });
+
+    console.log(`Updated item ${itemId} on order ${orderId} to quantity ${quantity}`);
+
+    res.json({
+      success: true,
+      message: "Item quantity updated",
+      data: {
+        orderId,
+        itemId,
+        quantity,
+        subtotal: newSubtotal.toFixed(2),
+        newTotalAmount: newTotal.toFixed(2)
+      }
+    });
+
+  } catch (error) {
+    console.error("Update order item quantity error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update item quantity",
+      error: error.message
+    });
+  }
+}
+
+/**
+ * DELETE /api/orders/:orderId/items/:itemId - Remove an item from an order
+ * Refuses to remove the last remaining item — an order with zero items doesn't
+ * make sense, so the admin should cancel the order instead.
+ */
+export async function removeOrderItem(req, res) {
+  try {
+    const { orderId, itemId } = req.params;
+
+    const orders = await getAll("orders");
+    const order = orders.find(o => o.id === orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    const orderItems = await getAll("order_items");
+    const itemsForOrder = orderItems.filter(i => i.order_id === orderId);
+    const item = itemsForOrder.find(i => i.id === itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Order item not found"
+      });
+    }
+
+    if (itemsForOrder.length === 1) {
+      return res.status(400).json({
+        success: false,
+        code: "LAST_ITEM",
+        message: "This is the last item on the order. Cancel the order instead of removing its only item."
+      });
+    }
+
+    await remove("order_items", itemId);
+
+    const newTotal = sumSubtotals(itemsForOrder.filter(i => i.id !== itemId));
+    await update("orders", orderId, { total_amount: newTotal.toFixed(2) });
+
+    console.log(`Removed item ${itemId} from order ${orderId}`);
+
+    res.json({
+      success: true,
+      message: "Item removed from order",
+      data: {
+        orderId,
+        itemId,
+        newTotalAmount: newTotal.toFixed(2)
+      }
+    });
+
+  } catch (error) {
+    console.error("Remove order item error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove item from order",
+      error: error.message
+    });
+  }
+}
+
+/**
  * PUT /api/orders/:id/payment - Update payment status
  */
 export async function updatePaymentStatus(req, res) {
@@ -359,7 +701,6 @@ export async function updatePaymentStatus(req, res) {
     }
 
     // Update payment status and optionally payment method
-    const { update } = await import("../services/sheetService.js");
     const updates = { payment_status: paymentStatus };
     if (paymentMethod) {
       updates.payment_method = paymentMethod;
@@ -421,10 +762,12 @@ export async function getOrdersByCustomer(req, res) {
       return {
         ...order,
         items: items.map(item => ({
+          id: item.id,
           itemName: item.item_name,
           quantity: Number(item.quantity),
           price: Number(item.item_price),
-          subtotal: Number(item.subtotal)
+          subtotal: Number(item.subtotal),
+          itemStatus: item.item_status || "pending"
         })),
         itemCount: items.length
       };

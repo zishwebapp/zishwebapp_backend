@@ -25,8 +25,8 @@ export const sheetsConfig = {
   order_items: {
     sheetName: "Order_Items",
     partitioned: true,
-    columns: ["id", "order_id", "menu_item_id", "item_name", "item_price", "quantity", "subtotal", "special_instructions"],
-    headers: ["Item ID", "Order ID", "Menu Item ID", "Item Name", "Price", "Quantity", "Subtotal", "Special Instructions"]
+    columns: ["id", "order_id", "menu_item_id", "item_name", "item_price", "quantity", "subtotal", "special_instructions", "item_status"],
+    headers: ["Item ID", "Order ID", "Menu Item ID", "Item Name", "Price", "Quantity", "Subtotal", "Special Instructions", "Item Status"]
   },
 
   order_status_history: {

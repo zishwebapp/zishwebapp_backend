@@ -115,7 +115,16 @@ async function findInTab(sheets, spreadsheetId, tableKey, id, tabName) {
       range: `${tabName}!A2:Z`
     });
   } catch (err) {
-    return null; // tab doesn't exist (e.g. no previous-quarter tab yet)
+    // Google returns 400 "Unable to parse range" when the tab itself doesn't
+    // exist (e.g. no previous-quarter tab yet) — that's the only case where
+    // treating this as "not found" is correct. Anything else (429 quota
+    // exceeded, 5xx, network errors) is a real failure and must propagate,
+    // otherwise callers see a misleading "not found" instead of the actual
+    // problem (see GOOGLE_SHEETS_QUOTA_ISSUE.md).
+    if (err.code === 400) {
+      return null;
+    }
+    throw err;
   }
 
   const rows = res.data.values || [];
