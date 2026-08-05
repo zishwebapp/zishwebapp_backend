@@ -1,4 +1,5 @@
 import { getAll } from "../services/sheetService.js";
+import { resolveDateRange, isWithinRange } from "../services/dateRange.js";
 
 /**
  * GET /api/stats/revenue - Get revenue statistics (paid orders only)
@@ -103,6 +104,9 @@ export async function getDashboardStats(req, res) {
   try {
     console.log("Fetching dashboard statistics...");
 
+    const { range, start, end } = req.query;
+    const { startDate, endDate } = resolveDateRange(range, start, end);
+
     // Get all orders and order items
     const orders = await getAll("orders");
     const orderItems = await getAll("order_items");
@@ -129,10 +133,13 @@ export async function getDashboardStats(req, res) {
       order.order_status === 'completed' && order.payment_status === 'paid'
     ).length;
     
-    // Fast Moving Items - top 20 items by quantity sold (exclude cancelled orders)
+    // Fast Moving Items - top 20 items by quantity sold within the selected date range (exclude cancelled orders)
     const validOrderIds = new Set(
       orders
-        .filter(order => order.order_status !== 'cancelled')
+        .filter(order =>
+          order.order_status !== 'cancelled' &&
+          isWithinRange(order.created_at, startDate, endDate)
+        )
         .map(order => order.id)
     );
     
